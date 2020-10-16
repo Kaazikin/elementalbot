@@ -9,9 +9,8 @@ import datetime
 
 
 # Calculates generation
-def min_generation(combinations):
-    # TODO Implement min_generation
-    return 0
+def min_generation(combination):
+    return min(i.generation for i in combination.inputs) + 1
 
 
 # Will fill dictionaries with Firebase data
@@ -20,8 +19,8 @@ def populate_dictionaries():
 
 
 class Category:
-    def __init__(self, ID, name, desc, colour=0x000000, imageurl = ""):
-        self.ID = ID
+    def __init__(self, id, name, desc, colour=0x000000, imageurl = ""):
+        self.id = id
         self.name = name
         self.desc = desc
         self.colour = colour
@@ -29,20 +28,21 @@ class Category:
 
 
 class Combination:
-    def __init__(self, ID, output, **inputs):
+    def __init__(self, ID, output, generation, **inputs):
         self.ID = ID
         self.output = output
         self.inputs = inputs
+
 
 
 default = Category(0, "Core Elements", "These are the starter elements")
 
 
 class Element:
-    def __init__(self, combinations, ID, name, colour=0x000000, creationdate=datetime.date.today(), usecount=0,
+    def __init__(self, combinations, id, name, colour=0x000000, creationdate=datetime.date.today(), usecount=0,
                  unlockedcount=1, imageurl="", generation=-1, description="No note.", creator=None, category=default):
         self.combinations = combinations
-        self.ID = ID
+        self.id = id
         self.name = name
         self.creationdate = creationdate
         self.colour = colour
@@ -84,7 +84,7 @@ async def info(ctx, element):
         else:
             current = elementdictionary[elementindex[element.capitalize()]]
         output = discord.Embed()
-        output.title = "Element Info: " + current.name
+        output.title = "Element Info: " + current.name + " (#" + str(current.id) + ")"
         output.description = current.description
         output.colour = discord.Colour(current.colour)
         output.add_field(name="Created By:", value=str(client.get_user(current.creator)), inline=True)
