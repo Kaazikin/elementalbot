@@ -1,6 +1,10 @@
 # TODO Implement element combinations
 # TODO Personal inventory
 # TODO Add Firebase backup
+# TODO Fix <2 combo with elements that have been used in other combos
+# TODO Fix combo count incrementing
+# TODO Fix new element output string
+
 import discord
 import math
 import pyrebase
@@ -19,7 +23,7 @@ def sort_element_id(element):
 
 
 class Category:
-    def __init__(self, id, name, desc, colour=0x000000, imageurl = ""):
+    def __init__(self, id, name, desc, colour=0x000000, imageurl=""):
         self.id = id
         self.name = name
         self.desc = desc
@@ -34,10 +38,17 @@ class Combination:
         self.inputs = sorted(inputs, key=sort_element_id)
 
     def compare_input(self, other):
-        return self.inputs.sort() == other.inputs.sort()
+        for e in self.inputs:
+            if e not in other.inputs:
+                return False
+        return True
 
     def get_generation(self):
-        return max(i.generation for i in self.inputs)
+        print([i.generation for i in self.inputs])
+        return max([i.generation for i in self.inputs])
+
+    def __repr__(self):
+        return "Combination({}, {}, {}, {})".format(self.ID, self.output, self.inputs, self.get_generation())
 
 
 default = Category(0, "No Category", "These are elements with no category.")
@@ -109,7 +120,8 @@ async def on_ready():
 # sends all info of an element as an embed.
 # TODO: Fix multi element combos. Start with the embed.
 @client.command()
-async def info(ctx, element):
+async def info(ctx, *element):
+    element = " ".join(element)
     try:
         if element[0] == "#":
             current = element_dictionary[int(element[1:])]
@@ -122,7 +134,7 @@ async def info(ctx, element):
         output.add_field(name="Created By:", value=str(client.get_user(current.creator)), inline=True)
         output.add_field(name="Created On:", value=str(current.creationdate), inline=True)
         output.add_field(name="Used in:", value=str(current.usecount), inline=True)
-        output.add_field(name="Made with:" , value=str(current.get_combination_count()), inline=True)
+        output.add_field(name="Made with:", value=str(current.get_combination_count()), inline=True)
         output.add_field(name="Unlocked by ", value=str(current.unlockedcount), inline=True)
         output.add_field(name="Category:", value=current.category.name, inline=True)
         output.add_field(name="Generation Number:", value=str(current.get_generation()), inline=True)
@@ -145,6 +157,7 @@ async def add(ctx, elements):
         elements_valid = True
         stored_elems = []
         for e in elements:
+            # TODO Fix this check
             curr = element_dictionary[element_index[e.capitalize()]]
             if e.capitalize() != curr.name:
                 elements_valid = False
@@ -154,7 +167,7 @@ async def add(ctx, elements):
             tempcombo = Combination(-1, None, stored_elems)
             combo_found = False
             combo = None
-            for curr_combo in combo_dictionary:
+            for curr_combo in range(len(combo_dictionary)):
                 if tempcombo.compare_input(combo_dictionary[curr_combo]):
                     combo_found = True
                     combo = combo_dictionary[curr_combo]
@@ -174,21 +187,25 @@ async def add(ctx, elements):
 
 # Adds combinations & new elements
 @client.command()
-async def suggest(ctx, element):
+async def suggest(ctx, *element):
     # TODO Voting
+    element = [e.capitalize() for e in element]
     if ctx.message.author in last_combo_dictionary.keys():
-        if element.capitalize() in element_index.keys():
-            i = element_index[element.capitalize()]
+        if " ".join(element) in element_index.keys():
+            i = element_index[" ".join(element)]
             out_elem = element_dictionary[i]
             curr = last_combo_dictionary[ctx.message.author]
-            j = len(combo_dictionary)-1
+            j = len(combo_dictionary) - 1
             out_combo = Combination(j, out_elem, curr.inputs)
             combo_dictionary[j] = out_combo
             element_dictionary[element_index[i]].add_combo(combo_dictionary[j])
             out_string = ""
+
+            # TODO Put in combo thing
+
             for item in curr.inputs:
                 out_string += item.name
-                if item != curr.inputs[len(curr.inputs)-1]:
+                if item != curr.inputs[len(curr.inputs) - 1]:
                     out_string += " + "
                 else:
                     out_string += " = " + out_elem.name
@@ -197,23 +214,22 @@ async def suggest(ctx, element):
             curr = last_combo_dictionary[ctx.message.author]
             j = len(combo_dictionary)
 
-            colours = []
-            for e in range(len(element_dictionary)):
-                colours.append(tuple(int(str(element_dictionary[e].colour)[i:i+2], 16) for i in (0, 2, 4)))
-            sum_r = sum_g = sum_b = 0
-            for c in colours:
-                sum_r += c[0]**2
-                sum_g += c[1]**2
-                sum_b += c[2]**2
+            # TODO Fix Colours
 
-            elem_colour = int('%02x%02x%02x' % (int(math.sqrt(sum_r)), int(math.sqrt(sum_g)), int(math.sqrt(sum_b))),
-                              16)
-            out_elem = Element([], len(element_dictionary), element.capitalize(), colour=elem_colour,
+            elem_colour = 0x000000
+            out_elem = Element([], len(element_dictionary), " ".join(element), colour=elem_colour,
                                creationdate=datetime.datetime.now(), creator=ctx.message.author.id)
+
             element_dictionary[out_elem.id] = out_elem
             element_index[out_elem.name] = out_elem.id
             out_combo = Combination(j, element_dictionary[out_elem.id], curr.inputs)
+
             element_dictionary[out_elem.id].add_combo(out_combo)
+            combo_dictionary[j] = out_combo
+
+            for c in range(len(combo_dictionary)):
+                print(combo_dictionary[c])
+
             out_string = ""
             for item in curr.inputs:
                 out_string += item.name
@@ -221,10 +237,11 @@ async def suggest(ctx, element):
                     out_string += " + "
                 else:
                     out_string += " = " + out_elem.name
-            await ctx.send("New element: " + out_string + " :new:")
 
+            await ctx.send("New element: " + out_string + " :new:")
     else:
         await ctx.send("No active combo!")
+
 
 # Live storage of elements and combinations. Will update and save to Firebase regularly.
 element_dictionary = {}
@@ -234,18 +251,17 @@ last_combo_dictionary = {}
 kaazikin = config.get("kaazikin.id").data
 print(kaazikin)
 
-
 # Default elements for initial testing
 element_dictionary[0] = Element([], 0, "Water", 0x4a8edf, datetime.datetime(2020, 10, 16, 0, 0, 0, 0), 1, 1, "", 0,
                                 "A colorless, transparent, odorless liquid that forms the seas, lakes, rivers, "
                                 + "and rain and is the basis of the fluids of living organisms.", int(kaazikin),
                                 starter)
-element_dictionary[1] = Element([], 1, "Earth", 0x764722, datetime.datetime(2020, 10, 16, 0, 0, 0,0), 1, 1, "", 0,
+element_dictionary[1] = Element([], 1, "Earth", 0x764722, datetime.datetime(2020, 10, 16, 0, 0, 0, 0), 1, 1, "", 0,
                                 "The substance of the land surface; soil.", int(kaazikin), starter)
-element_dictionary[2] = Element([], 2, "Fire", 0xfe5913, datetime.datetime(2020, 10, 16, 0, 0, 0,0), 0, 1, "", 0,
+element_dictionary[2] = Element([], 2, "Fire", 0xfe5913, datetime.datetime(2020, 10, 16, 0, 0, 0, 0), 0, 1, "", 0,
                                 "Combustion or burning, in which substances combine chemically with oxygen from the air"
                                 + " and typically give out bright light, heat, and smoke.", int(kaazikin), starter)
-element_dictionary[3] = Element([], 3, "Air", 0xfffce0,datetime.datetime(2020, 10, 16, 0, 0, 0,0), 0, 1, "", 0,
+element_dictionary[3] = Element([], 3, "Air", 0xfffce0, datetime.datetime(2020, 10, 16, 0, 0, 0, 0), 0, 1, "", 0,
                                 "The invisible gaseous substance surrounding the earth, "
                                 + "a mixture mainly of oxygen and nitrogen.", int(kaazikin), starter)
 # element_dictionary[4] = Element([], 4, "Mud", 0x968050, datetime.date.today(), 0, 1, creator=int(kaazikin))
@@ -261,4 +277,3 @@ for x in range(len(element_dictionary)):
 
 # Run the bot
 client.run(config.get("discord.token").data)
-
