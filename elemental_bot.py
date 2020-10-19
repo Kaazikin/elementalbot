@@ -1,7 +1,5 @@
 # TODO Personal inventory
 # TODO Add Firebase backup
-# TODO Fix combo count incrementing
-# TODO Fix new element output string
 
 import discord
 import math
@@ -86,7 +84,8 @@ class Element:
 
     def get_generation(self):
         if self.generation == -1:
-            return self.combinations[0].get_generation() + 1
+            self.generation = self.combinations[0].get_generation()+1
+            return self.generation
         else:
             return self.generation
 
@@ -204,7 +203,7 @@ async def suggest(ctx, *element):
         if " ".join(element) in element_index.keys():
             i = element_index[" ".join(element)]
             out_elem = element_dictionary[i]
-            curr = last_combo_dictionary[ctx.message.author]
+            curr = last_combo_dictionary.pop(ctx.message.author, None)
             j = len(combo_dictionary) - 1
             out_combo = Combination(j, out_elem, curr.inputs)
             combo_dictionary[j] = out_combo
@@ -213,22 +212,25 @@ async def suggest(ctx, *element):
 
             # TODO Put in combo thing
 
-            for item in curr.inputs:
-                out_string += item.name
-                if item != curr.inputs[len(curr.inputs) - 1]:
+            for z in range(len(curr.inputs)):
+                out_string += curr.inputs[z].name
+                if z != len(curr.inputs) - 1:
                     out_string += " + "
                 else:
                     out_string += " = " + out_elem.name
+
             await ctx.send("New combination: " + out_string + " :new:")
         else:
-            curr = last_combo_dictionary[ctx.message.author]
+            curr = last_combo_dictionary.pop(ctx.message.author, None)
+
             j = len(combo_dictionary)
 
             # TODO Fix Colours
 
             elem_colour = 0x000000
             out_elem = Element([], len(element_dictionary), " ".join(element), colour=elem_colour,
-                               creationdate=datetime.datetime.now(), creator=ctx.message.author.id)
+                               creationdate=datetime.datetime.now(), creator=ctx.message.author.id,
+                               generation=(curr.get_generation() + 1))
 
             element_dictionary[out_elem.id] = out_elem
             element_index[out_elem.name] = out_elem.id
@@ -237,13 +239,10 @@ async def suggest(ctx, *element):
             element_dictionary[out_elem.id].add_combo(out_combo)
             combo_dictionary[j] = out_combo
 
-            for c in range(len(combo_dictionary)):
-                print(combo_dictionary[c])
-
             out_string = ""
-            for item in curr.inputs:
-                out_string += item.name
-                if item != curr.inputs[len(curr.inputs) - 1]:
+            for z in range(len(curr.inputs)):
+                out_string += curr.inputs[z].name
+                if z != len(curr.inputs) - 1:
                     out_string += " + "
                 else:
                     out_string += " = " + out_elem.name
