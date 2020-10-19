@@ -3,6 +3,7 @@
 
 import discord
 import math
+import random
 import pyrebase
 from jproperties import Properties
 from discord.ext import commands, tasks
@@ -37,7 +38,6 @@ class Combination:
         return sorted(self.inputs, key=sort_element_id) == sorted(other.inputs, key=sort_element_id)
 
     def get_generation(self):
-        print([i.generation for i in self.inputs])
         return max([i.generation for i in self.inputs])
 
     def __repr__(self):
@@ -127,10 +127,9 @@ async def on_ready():
 
 
 # sends all info of an element as an embed.
-# TODO: Fix multi element combos. Start with the embed.
 @client.command()
 async def info(ctx, *element):
-    element = " ".join(element)
+    element = " ".join(element).capitalize()
     try:
         if element[0] == "#":
             current = element_dictionary[int(element[1:])]
@@ -225,9 +224,8 @@ async def suggest(ctx, *element):
 
             j = len(combo_dictionary)
 
-            # TODO Fix Colours
-
-            elem_colour = 0x000000
+            # TODO Replace random colour with either average colour or colour in range between parents.
+            elem_colour = int(hex(rand.randint(0, 16777215)), 16)
             out_elem = Element([], len(element_dictionary), " ".join(element), colour=elem_colour,
                                creationdate=datetime.datetime.now(), creator=ctx.message.author.id,
                                generation=(curr.get_generation() + 1))
@@ -258,7 +256,6 @@ element_index = {}
 combo_dictionary = {}
 last_combo_dictionary = {}
 kaazikin = config.get("kaazikin.id").data
-print(kaazikin)
 
 # Default elements for initial testing
 element_dictionary[0] = Element([], 0, "Water", 0x4a8edf, datetime.datetime(2020, 10, 16, 0, 0, 0, 0), 1, 1, "", 0,
@@ -283,6 +280,9 @@ element_dictionary[3] = Element([], 3, "Air", 0xfffce0, datetime.datetime(2020, 
 for x in range(len(element_dictionary)):
     element_index[element_dictionary[x].name] = x
     print("Indexed element " + str(x) + " " + element_dictionary[x].name)
+
+rand = random.Random()
+rand.seed()
 
 # Run the bot
 client.run(config.get("discord.token").data)
