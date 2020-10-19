@@ -1,7 +1,5 @@
-# TODO Implement element combinations
 # TODO Personal inventory
 # TODO Add Firebase backup
-# TODO Fix <2 combo with elements that have been used in other combos
 # TODO Fix combo count incrementing
 # TODO Fix new element output string
 
@@ -32,23 +30,35 @@ class Category:
 
 
 class Combination:
-    def __init__(self, ID, output, inputs):
-        self.ID = ID
+    def __init__(self, id, output, inputs):
+        self.id = id
         self.output = output
         self.inputs = sorted(inputs, key=sort_element_id)
 
     def compare_input(self, other):
-        for e in self.inputs:
-            if e not in other.inputs:
-                return False
-        return True
+        return sorted(self.inputs, key=sort_element_id) == sorted(other.inputs, key=sort_element_id)
 
     def get_generation(self):
         print([i.generation for i in self.inputs])
         return max([i.generation for i in self.inputs])
 
     def __repr__(self):
-        return "Combination({}, {}, {}, {})".format(self.ID, self.output, self.inputs, self.get_generation())
+        return "Combination({}, {}, {}, {})".format(self.id, self.output, self.inputs, self.get_generation())
+
+    def __gt__(self, other):
+        return self.id > other.id
+
+    def __lt__(self, other):
+        return self.id < other.id
+
+    def __eq__(self, other):
+        return self.id == other.id
+
+    def __le__(self, other):
+        return self.id <= other.id
+
+    def __ge__(self, other):
+        return self.id >= other.id
 
 
 default = Category(0, "No Category", "These are elements with no category.")
