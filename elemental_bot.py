@@ -1,8 +1,18 @@
 # TODO Personal inventory
 # TODO Add Firebase backup
-# TODO Fix shared inventory bug
-# TODO Fix duplicates in inventory bug
-
+# TODO Give new users inventories
+# TODO Sorting inventory
+# TODO Sign
+# TODO Change colour
+# TODO Add image
+# TODO Voting
+# TODO Randomized status message (Change every 20 minutes?)
+# TODO Unlocked by numbers
+# TODO Fix inventory past 30 elements
+# TODO Illegal characters in element names
+# TODO Element name length fix
+# TODO Element check in info screen
+# TODO Hints
 import discord
 import math
 import random
@@ -152,12 +162,12 @@ async def on_ready():
     for g in guilds:
         for user in g.members:
             # TODO Load inventories from file
-            user_dictionary[user.id] = User(user.id, default_inventory)
+            user_dictionary[user.id] = User(user.id, default_inventory[:])
     await client.change_presence(activity=discord.Game("Looking for #play7"))
 
 
 # sends all info of an element as an embed.
-@client.command()
+@client.command(aliases=["?"], help="Returns information on an element.")
 async def info(ctx, *element):
     element = " ".join(element).capitalize()
     try:
@@ -183,7 +193,7 @@ async def info(ctx, *element):
 
 
 # Command to combine elements.
-@client.command()
+@client.command(aliases=["+"], help="Combines two to nine (inclusive) elements together.")
 async def add(ctx, *, elements):
     valid = False
     if "," in elements:
@@ -221,13 +231,17 @@ async def add(ctx, *, elements):
                     combo = combo_dictionary[curr_combo]
                     break
             if combo_found:
-                # TODO Inventory stuff, validation stuff
-                user_dictionary[ctx.message.author.id].add_inventory(combo.output)
-                await ctx.send("You created " + combo.output.name + ".")
+                if combo.output in user_dictionary[ctx.message.author.id].inventory:
+                    await ctx.send("{} You made **{}**, but already have it :blue_circle:".format(ctx.message.author.
+                                                                                                  mention, combo.
+                                                                                                  output.name))
+                else:
+                    user_dictionary[ctx.message.author.id].add_inventory(combo.output)
+                    await ctx.send("{} You made {} :new:".format(ctx.message.author.mention, combo.output.name))
             else:
                 last_combo_dictionary[ctx.message.author] = tempcombo
-                await ctx.send("This combo does not exist. :red_circle:\nUse !suggest to suggest a combo.")
-                # TODO Clean this up
+                await ctx.send(ctx.message.author.mention +
+                               " This combo does not exist. :red_circle:\nUse !suggest to suggest a combo.")
         else:
             await ctx.send("Invalid element.")
     else:
@@ -235,7 +249,7 @@ async def add(ctx, *, elements):
 
 
 # Adds combinations & new elements
-@client.command()
+@client.command(aliases=["s"], help="Suggest a new element or combination.")
 async def suggest(ctx, *, element):
     # TODO Voting
     element = element.strip()
@@ -265,7 +279,8 @@ async def suggest(ctx, *, element):
                     out_string += " + "
                 else:
                     out_string += " = " + out_elem.name
-            user_dictionary[ctx.message.author.id].add_inventory(out_elem)
+            if out_elem not in user_dictionary[ctx.message.author.id].inventory:
+                user_dictionary[ctx.message.author.id].add_inventory(out_elem)
             await ctx.send("New combination: " + out_string + " :new:")
         else:
             curr = last_combo_dictionary.pop(ctx.message.author, None)
@@ -306,7 +321,7 @@ async def suggest(ctx, *, element):
         await ctx.send("No active combo!")
 
 
-@client.command(aliases=["bag", "elems"])
+@client.command(aliases=["bag", "elems"], help="Displays user inventory.")
 async def inv(ctx):
     pages = []
     k = 1
