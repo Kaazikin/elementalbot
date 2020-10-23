@@ -7,6 +7,7 @@
 # TODO Reset inventory
 # TODO Plurals
 # TODO Pattern matching in on_message
+# TODO Rewrite voting
 import discord
 import re
 import math
@@ -134,6 +135,10 @@ class User:
         return "User: " + self.id
 
 
+class Vote:
+    pass
+
+
 intents = discord.Intents.default()
 intents.members = True
 intents.guild_messages = True
@@ -192,7 +197,7 @@ async def on_reaction_add(reaction, user):
                 vote_dictionary[reaction.message.id][4].append(user.id)
 
                 # Handling for passing the vote threshold for specific vote types
-                if vote_dictionary[reaction.message.id][0] >= 3:
+                if vote_dictionary[reaction.message.id][0] >= 2:
                     if vote_dictionary[reaction.message.id][1] == "combination":  # If voting for a combination
 
                         out_combo = vote_dictionary[reaction.message.id][2]
@@ -218,8 +223,13 @@ async def on_reaction_add(reaction, user):
                             send(":new: Combination **{}** *(Suggested by {})*".format(out_combo.output.name,
                                  client.get_user(vote_dictionary[reaction.message.id][3]).mention))
 
+                        vote_count_dictionary[vote_dictionary[reaction.message.id][3]] -= 1
                         vote_dictionary.pop(reaction.message.id)
                         await reaction.message.delete()
+                        for votes in vote_dictionary.keys():
+                            if vote_dictionary[votes][2].inputs == out_combo.inputs:
+                                vote_count_dictionary[vote_dictionary[votes].pop()[3]] -= 1
+                                await reaction.message.channel.get_message(votes).delete()
 
                     elif vote_dictionary[reaction.message.id][1] == "element":  # If voting for a new element
                         out_elem = vote_dictionary[reaction.message.id][2]
@@ -247,8 +257,13 @@ async def on_reaction_add(reaction, user):
                             send(":new: Element **{}** *(Suggested by {})*".format(out_elem.name,
                                 client.get_user(vote_dictionary[reaction.message.id][3]).mention))
 
+                        vote_count_dictionary[vote_dictionary[reaction.message.id][3]] -= 1
                         vote_dictionary.pop(reaction.message.id)
                         await reaction.message.delete()
+                        for votes in vote_dictionary.keys():
+                            if vote_dictionary[votes][5].inputs == out_combo.inputs:
+                                vote_count_dictionary[vote_dictionary[votes].pop()[3]] -= 1
+                                await reaction.message.channel.get_message(votes).delete()
 
                     elif vote_dictionary[reaction.message.id][1] == "colour": # If voting to change colour
                         e = vote_dictionary[reaction.message.id][2]
@@ -257,6 +272,8 @@ async def on_reaction_add(reaction, user):
                         await client.get_channel(int(config.get("channel.announcement").data)). \
                             send(":paintbrush: Colour Change: **{}** *(Suggested by {})*".format(e.name,
                                 client.get_user(vote_dictionary[reaction.message.id][5]).mention))
+
+                        vote_count_dictionary[vote_dictionary[reaction.message.id][5]] -= 1
                         vote_dictionary.pop(reaction.message.id)
                         await reaction.message.delete()
 
@@ -270,15 +287,28 @@ async def on_reaction_add(reaction, user):
                         await client.get_channel(int(config.get("channel.announcement").data)). \
                             send(":card_box: Category Change: **{}** *(Suggested by {})*".format(e.name,
                                  client.get_user(vote_dictionary[reaction.message.id][5]).mention))
+
+                        vote_count_dictionary[vote_dictionary[reaction.message.id][5]] -= 1
                         vote_dictionary.pop(reaction.message.id)
                         await reaction.message.delete()
 
             elif reaction.emoji == "🔽" and user.id not in vote_dictionary[reaction.message.id][4]:
                 vote_dictionary[reaction.message.id][0] -= 1
                 vote_dictionary[reaction.message.id][4].append(user.id)
-                if user.id == vote_dictionary[reaction.message.id][3] or vote_dictionary[reaction.message.id][0] <= -3:
-                    vote_dictionary.pop(reaction.message.id)
+                if user.id == vote_dictionary[reaction.message.id][3] or vote_dictionary[reaction.message.id][0] <= -2 or user.id == vote_dictionary[reaction.message.id][5]:
+                    try:
+                        vote_count_dictionary[vote_dictionary.pop(reaction.message.id)[3]] -= 1
+                    except:
+                        pass
+
+                    try:
+                        vote_count_dictionary[vote_dictionary.pop(reaction.message.id)[5]] -= 1
+                    except:
+                        pass
+
+                    vote_count_dictionary[vote_dictionary.pop(reaction.message.id)[3]] -= 1
                     await reaction.message.delete()
+
             elif reaction.emoji == "🔽" and user.id == vote_dictionary[reaction.message.id][3]:
                 vote_dictionary.pop(reaction.message.id)
                 await reaction.message.delete()
@@ -286,7 +316,7 @@ async def on_reaction_add(reaction, user):
 
 @client.event
 async def on_reaction_remove(reaction, user):
-    if reaction.message.channel.id == int(config.get("channel.voting").data) and not user != client.user:
+    if reaction.message.channel.id == int(config.get("channel.voting").data) and user != client.user:
         if reaction.message.id in vote_dictionary.keys():
             if reaction.emoji == "🔼" and user.id in vote_dictionary[reaction.message.id][4]:
                 vote_dictionary[reaction.message.id][0] -= 1
@@ -400,8 +430,8 @@ async def suggest(ctx, *, element):
         if len(e) > 65 or "+" in e or "," in e or "!" in e:
             element_valid = False
     if ctx.message.author in last_combo_dictionary.keys():
-        if element in element_index.keys():  # New combination
-            i = element_index[element]
+        if element.upper() in element_index.keys():  # New combination
+            i = element_index[element.upper()]
             out_elem = element_dictionary[i]
             curr = last_combo_dictionary.pop(ctx.message.author, None)
             j = len(combo_dictionary)
@@ -427,7 +457,7 @@ async def suggest(ctx, *, element):
 
             for poll in vote_dictionary:
                 if vote_dictionary[poll][1] == "combination":
-                    if vote_dictionary[poll][2] == out_combo:
+                    if vote_dictionary[poll][2] == out_combo and vote_dictionary[poll][3] == ctx.message.author.id:
                         can_add_poll = False
 
             if can_add_poll:
@@ -486,7 +516,7 @@ async def suggest(ctx, *, element):
 
             for poll in vote_dictionary:
                 if vote_dictionary[poll][1] == "element":
-                    if vote_dictionary[poll][5] == curr:
+                    if vote_dictionary[poll][5] == curr and vote_dictionary[poll][3] == ctx.message.author.id:
                         can_add_poll = False
 
             if can_add_poll:
@@ -568,7 +598,7 @@ async def colour(ctx, element, colour):
 
                 for poll in vote_dictionary:
                     if vote_dictionary[poll][1] == "colour":
-                        if vote_dictionary[poll][2] == element:
+                        if vote_dictionary[poll][2] == element and vote_dictionary[poll][5] == ctx.message.author.id:
                             can_add_poll = False
                 if can_add_poll:
                     embed = discord.Embed()
@@ -630,7 +660,7 @@ async def category(ctx, element, category):
 
         for poll in vote_dictionary:
             if vote_dictionary[poll][1] == "category":
-                if vote_dictionary[poll][2] == element:
+                if vote_dictionary[poll][2] == e and vote_dictionary[poll][5] == ctx.message.author.id:
                     can_add_poll = False
         if can_add_poll:
             embed = discord.Embed()
