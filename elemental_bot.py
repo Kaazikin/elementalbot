@@ -6,6 +6,7 @@
 # TODO Hints
 # TODO Reset inventory
 # TODO Plurals
+# TODO Pattern matching in on_message
 import discord
 import re
 import math
@@ -57,7 +58,7 @@ class Combination:
         return self.id < other.id
 
     def __eq__(self, other):
-        return self.id == other.id
+        return self.id == other.id and self.output == other.output and self.inputs == other.inputs
 
     def __le__(self, other):
         return self.id <= other.id
@@ -191,10 +192,11 @@ async def on_reaction_add(reaction, user):
                 vote_dictionary[reaction.message.id][4].append(user.id)
 
                 # Handling for passing the vote threshold for specific vote types
-                if vote_dictionary[reaction.message.id][0] >= 1:
+                if vote_dictionary[reaction.message.id][0] >= 3:
                     if vote_dictionary[reaction.message.id][1] == "combination":  # If voting for a combination
 
                         out_combo = vote_dictionary[reaction.message.id][2]
+                        out_combo.id = len(combo_dictionary)
                         combo_dictionary[out_combo.id] = out_combo
                         element_dictionary[out_combo.output.id].add_combo(combo_dictionary[out_combo.id])
 
@@ -223,13 +225,15 @@ async def on_reaction_add(reaction, user):
                         out_elem = vote_dictionary[reaction.message.id][2]
                         curr = vote_dictionary[reaction.message.id][5]
                         j = len(combo_dictionary)
+                        i = len(element_dictionary)
+                        out_elem.id = i
                         element_dictionary[out_elem.id] = out_elem
                         element_index[out_elem.name.upper()] = out_elem.id
                         out_combo = Combination(j, element_dictionary[out_elem.id], curr.inputs)
 
                         element_dictionary[out_elem.id].add_combo(out_combo)
                         combo_dictionary[j] = out_combo
-                        user_dictionary[user.id].add_inventory(out_elem)
+                        user_dictionary[vote_dictionary[reaction.message.id][3]].add_inventory(out_elem)
 
                         element_unique = []
                         for element in out_combo.inputs:
@@ -272,9 +276,12 @@ async def on_reaction_add(reaction, user):
             elif reaction.emoji == "🔽" and user.id not in vote_dictionary[reaction.message.id][4]:
                 vote_dictionary[reaction.message.id][0] -= 1
                 vote_dictionary[reaction.message.id][4].append(user.id)
-                if user.id == vote_dictionary[reaction.message.id][3] or vote_dictionary[reaction.message.id][0] <= -1:
+                if user.id == vote_dictionary[reaction.message.id][3] or vote_dictionary[reaction.message.id][0] <= -3:
                     vote_dictionary.pop(reaction.message.id)
                     await reaction.message.delete()
+            elif reaction.emoji == "🔽" and user.id == vote_dictionary[reaction.message.id][3]:
+                vote_dictionary.pop(reaction.message.id)
+                await reaction.message.delete()
 
 
 @client.event
