@@ -1,19 +1,13 @@
-# TODO Personal inventory
 # TODO Add Firebase backup
-# TODO Give new users inventories
 # TODO Sorting inventory
 # TODO Sign
-# TODO Change colour
 # TODO Add image
-# TODO Voting
-# TODO Randomized status message (Change every 20 minutes?)
 # TODO Unlocked by numbers
-# TODO Fix inventory past 30 elements
-# TODO Illegal characters in element names
-# TODO Element name length fix
-# TODO Element check in info screen
 # TODO Hints
+# TODO Reset inventory
+# TODO Plurals
 import discord
+import re
 import math
 import random
 import pyrebase
@@ -163,18 +157,153 @@ async def on_ready():
         for user in g.members:
             # TODO Load inventories from file
             user_dictionary[user.id] = User(user.id, default_inventory[:])
-    await client.change_presence(activity=discord.Game("Looking for #play7"))
+    await client.change_presence(activity=discord.Game(random.choice(status_list)))
+    random_status.start()
+
+
+@client.event
+async def on_message(message):
+
+    if str(message.channel.id) in config.get("channel.play").data.split(", "):
+        if "!" not in message.content:
+            if "+" in message.content or "," in message.content:
+                ctx = await client.get_context(message)
+                await add(ctx=ctx, elements=message.content)
+
+    await client.process_commands(message)
+
+
+# Creates inventory for new members
+@client.event
+async def on_member_join(member):
+    if member.id not in user_dictionary.keys():
+        user_dictionary[member.id] = User(member.id, default_inventory[:])
+
+
+# Voting reaction handling
+@client.event
+async def on_reaction_add(reaction, user):
+    if reaction.message.channel.id == int(config.get("channel.voting").data) and user != client.user:
+        if reaction.message.id in vote_dictionary.keys():
+            if reaction.emoji == "🔼" and user.id not in vote_dictionary[reaction.message.id][4]:
+
+                vote_dictionary[reaction.message.id][0] += 1
+                vote_dictionary[reaction.message.id][4].append(user.id)
+
+                # Handling for passing the vote threshold for specific vote types
+                if vote_dictionary[reaction.message.id][0] >= 1:
+                    if vote_dictionary[reaction.message.id][1] == "combination":  # If voting for a combination
+
+                        out_combo = vote_dictionary[reaction.message.id][2]
+                        combo_dictionary[out_combo.id] = out_combo
+                        element_dictionary[out_combo.output.id].add_combo(combo_dictionary[out_combo.id])
+
+                        if element_dictionary[out_combo.output.id] not in \
+                                user_dictionary[vote_dictionary[reaction.message.id][3]].inventory:
+                            user_dictionary[vote_dictionary[reaction.message.id][3]].add_inventory(element_dictionary
+                                                                                                [out_combo.output.id])
+
+                        element_unique = []
+                        for element in out_combo.inputs:
+                            if element not in element_unique:
+                                element_unique.append(element)
+
+                        for element in element_unique:
+                            element.usecount += 1
+
+                        await client.get_channel\
+                            (int(config.get("channel.announcement").data)).\
+                            send(":new: Combination **{}** *(Suggested by {})*".format(out_combo.output.name,
+                                 client.get_user(vote_dictionary[reaction.message.id][3]).mention))
+
+                        vote_dictionary.pop(reaction.message.id)
+                        await reaction.message.delete()
+
+                    elif vote_dictionary[reaction.message.id][1] == "element":  # If voting for a new element
+                        out_elem = vote_dictionary[reaction.message.id][2]
+                        curr = vote_dictionary[reaction.message.id][5]
+                        j = len(combo_dictionary)
+                        element_dictionary[out_elem.id] = out_elem
+                        element_index[out_elem.name.upper()] = out_elem.id
+                        out_combo = Combination(j, element_dictionary[out_elem.id], curr.inputs)
+
+                        element_dictionary[out_elem.id].add_combo(out_combo)
+                        combo_dictionary[j] = out_combo
+                        user_dictionary[user.id].add_inventory(out_elem)
+
+                        element_unique = []
+                        for element in out_combo.inputs:
+                            if element not in element_unique:
+                                element_unique.append(element)
+
+                        for element in element_unique:
+                            element.usecount += 1
+
+                        await client.get_channel(int(config.get("channel.announcement").data)).\
+                            send(":new: Element **{}** *(Suggested by {})*".format(out_elem.name,
+                                client.get_user(vote_dictionary[reaction.message.id][3]).mention))
+
+                        vote_dictionary.pop(reaction.message.id)
+                        await reaction.message.delete()
+
+                    elif vote_dictionary[reaction.message.id][1] == "colour": # If voting to change colour
+                        e = vote_dictionary[reaction.message.id][2]
+                        c = vote_dictionary[reaction.message.id][3]
+                        e.colour = int(c, 16)
+                        await client.get_channel(int(config.get("channel.announcement").data)). \
+                            send(":paintbrush: Colour Change: **{}** *(Suggested by {})*".format(e.name,
+                                client.get_user(vote_dictionary[reaction.message.id][5]).mention))
+                        vote_dictionary.pop(reaction.message.id)
+                        await reaction.message.delete()
+
+                    elif vote_dictionary[reaction.message.id][1] == "category":
+                        e = vote_dictionary[reaction.message.id][2]
+                        c = vote_dictionary[reaction.message.id][3]
+                        if not vote_dictionary[reaction.message.id][6]:
+                            c.id = len(category_dictionary)
+                            category_dictionary[c.id] = c
+                        e.category = c
+                        await client.get_channel(int(config.get("channel.announcement").data)). \
+                            send(":card_box: Category Change: **{}** *(Suggested by {})*".format(e.name,
+                                 client.get_user(vote_dictionary[reaction.message.id][5]).mention))
+                        vote_dictionary.pop(reaction.message.id)
+                        await reaction.message.delete()
+
+            elif reaction.emoji == "🔽" and user.id not in vote_dictionary[reaction.message.id][4]:
+                vote_dictionary[reaction.message.id][0] -= 1
+                vote_dictionary[reaction.message.id][4].append(user.id)
+                if user.id == vote_dictionary[reaction.message.id][3] or vote_dictionary[reaction.message.id][0] <= -1:
+                    vote_dictionary.pop(reaction.message.id)
+                    await reaction.message.delete()
+
+
+@client.event
+async def on_reaction_remove(reaction, user):
+    if reaction.message.channel.id == int(config.get("channel.voting").data) and not user != client.user:
+        if reaction.message.id in vote_dictionary.keys():
+            if reaction.emoji == "🔼" and user.id in vote_dictionary[reaction.message.id][4]:
+                vote_dictionary[reaction.message.id][0] -= 1
+                vote_dictionary[reaction.message.id][4].remove(user.id)
+            elif reaction.emoji == "🔽" and user.id in vote_dictionary[reaction.message.id][4]:
+                vote_dictionary[reaction.message.id][0] += 1
+                vote_dictionary[reaction.message.id][4].remove(user.id)
+
+
+# Changes bot presence every twenty minutes.
+@tasks.loop(minutes=20.0)
+async def random_status():
+    await client.change_presence(activity=discord.Game(random.choice(status_list)))
 
 
 # sends all info of an element as an embed.
 @client.command(aliases=["?"], help="Returns information on an element.")
 async def info(ctx, *element):
-    element = " ".join(element).capitalize()
+    element = " ".join(element).upper()
     try:
         if element[0] == "#":
             current = element_dictionary[int(element[1:])]
         else:
-            current = element_dictionary[element_index[element.capitalize()]]
+            current = element_dictionary[element_index[element]]
         output = discord.Embed()
         output.title = "Element Info: " + current.name + " (#" + str(current.id) + ")"
         output.description = current.description
@@ -187,6 +316,8 @@ async def info(ctx, *element):
         output.add_field(name="Unlocked by:", value=str(current.unlockedcount), inline=True)
         output.add_field(name="Category:", value=current.category.name, inline=True)
         output.add_field(name="Generation:", value=str(current.get_generation()), inline=True)
+        output.add_field(name="Unlocked:", value=str(current in user_dictionary[ctx.message.author.id].inventory),
+                         inline=True)
         await ctx.send(content="", embed=output)
     except KeyError:
         await ctx.send("Invalid element.")
@@ -212,13 +343,13 @@ async def add(ctx, *, elements):
             e = e[0].upper()
             for c in range(1, e_length):
                 e += e_original[c]
-            try:
-                curr = element_dictionary[element_index[e]]
+            if e.upper() in map(lambda k: k.upper(), element_index.keys()):
+                curr = element_dictionary[element_index[e.upper()]]
                 if curr not in user_dictionary[ctx.message.author.id].inventory:
                     elements_valid = False
                     break
                 stored_elems.append(curr)
-            except KeyError:
+            else:
                 elements_valid = False
                 break
         if elements_valid:
@@ -251,38 +382,71 @@ async def add(ctx, *, elements):
 # Adds combinations & new elements
 @client.command(aliases=["s"], help="Suggest a new element or combination.")
 async def suggest(ctx, *, element):
-    # TODO Voting
     element = element.strip()
     element_length = len(element)
     element_original = element
     element = element[0].upper()
+    element_valid = True
     for c in range(1, element_length):
         element += element_original[c]
-
+    for e in element:
+        if len(e) > 65 or "+" in e or "," in e or "!" in e:
+            element_valid = False
     if ctx.message.author in last_combo_dictionary.keys():
-        if element in element_index.keys():
+        if element in element_index.keys():  # New combination
             i = element_index[element]
             out_elem = element_dictionary[i]
             curr = last_combo_dictionary.pop(ctx.message.author, None)
             j = len(combo_dictionary)
             out_combo = Combination(j, out_elem, curr.inputs)
-            combo_dictionary[j] = out_combo
-            element_dictionary[i].add_combo(combo_dictionary[j])
+
+            # Embed building for vote
             out_string = ""
             used_elems = []
             for z in range(len(curr.inputs)):
                 out_string += curr.inputs[z].name
                 if curr.inputs[z] not in used_elems:
-                    curr.inputs[z].usecount += 1
                     used_elems.append(curr.inputs[z])
                 if z != len(curr.inputs) - 1:
                     out_string += " + "
                 else:
                     out_string += " = " + out_elem.name
-            if out_elem not in user_dictionary[ctx.message.author.id].inventory:
-                user_dictionary[ctx.message.author.id].add_inventory(out_elem)
-            await ctx.send("New combination: " + out_string + " :new:")
-        else:
+
+            # Poll count restriction
+            try:
+                can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
+            except KeyError:
+                can_add_poll = True
+
+            for poll in vote_dictionary:
+                if vote_dictionary[poll][1] == "combination":
+                    if vote_dictionary[poll][2] == out_combo:
+                        can_add_poll = False
+
+            if can_add_poll:
+                embed = discord.Embed()
+                embed.title = ":new: Combination"
+                embed.description = "{}\nSuggested by {}".format(out_string, ctx.message.author.mention)
+                embed.colour = int(hex(rand.randint(0, 16777215)), 16)
+                embed.set_footer(text="Your vote can be changed, but will not be counted until you remove your other"
+                                      + " vote. Creators may downvote to delete.")
+                message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
+
+                vote_dictionary[message.id] = [0, "combination", out_combo, ctx.message.author.id, []]
+
+                try:
+                    vote_count_dictionary[ctx.message.author.id] += 1
+                except KeyError:
+                    vote_count_dictionary[ctx.message.author.id] = 1
+
+                await message.add_reaction("🔼")
+                await message.add_reaction("🔽")
+
+                await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
+            else:
+                await ctx.send("You cannot submit this poll!")
+
+        elif element_valid:  # New Element
             curr = last_combo_dictionary.pop(ctx.message.author, None)
 
             j = len(combo_dictionary)
@@ -297,30 +461,56 @@ async def suggest(ctx, *, element):
                                creationdate=creation_time, creator=ctx.message.author.id,
                                generation=(curr.get_generation() + 1))
 
-            element_dictionary[out_elem.id] = out_elem
-            element_index[out_elem.name] = out_elem.id
-            out_combo = Combination(j, element_dictionary[out_elem.id], curr.inputs)
-
-            element_dictionary[out_elem.id].add_combo(out_combo)
-            combo_dictionary[j] = out_combo
-
             out_string = ""
             used_elems = []
             for z in range(len(curr.inputs)):
                 out_string += curr.inputs[z].name
                 if curr.inputs[z] not in used_elems:
-                    curr.inputs[z].usecount += 1
                     used_elems.append(curr.inputs[z])
                 if z != len(curr.inputs) - 1:
                     out_string += " + "
                 else:
                     out_string += " = " + out_elem.name
-            user_dictionary[ctx.message.author.id].add_inventory(out_elem)
-            await ctx.send("New element: " + out_string + " :new:")
+
+            try:
+                can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
+            except KeyError:
+                can_add_poll = True
+
+            for poll in vote_dictionary:
+                if vote_dictionary[poll][1] == "element":
+                    if vote_dictionary[poll][5] == curr:
+                        can_add_poll = False
+
+            if can_add_poll:
+                embed = discord.Embed()
+                embed.title = ":new: Element"
+                embed.description = "{}\nSuggested by {}".format(out_string, ctx.message.author.mention)
+                embed.colour = out_elem.colour
+                embed.set_footer(text="Your vote can be changed, but will not be counted until you remove your other"
+                                      + " vote. Creators may downvote to delete.")
+                message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
+
+                vote_dictionary[message.id] = [0, "element", out_elem, ctx.message.author.id, [], curr]
+
+                try:
+                    vote_count_dictionary[ctx.message.author.id] += 1
+                except KeyError:
+                    vote_count_dictionary[ctx.message.author.id] = 1
+
+                await message.add_reaction("🔼")
+                await message.add_reaction("🔽")
+
+                await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
+            else:
+                await ctx.send("You cannot submit this poll!")
+        else:
+            await ctx.send("Invalid element name! :no_entry_sign:")
     else:
         await ctx.send("No active combo!")
 
 
+# Displays the inventory to a user.
 @client.command(aliases=["bag", "elems"], help="Displays user inventory.")
 async def inv(ctx):
     pages = []
@@ -331,34 +521,162 @@ async def inv(ctx):
     out_str = ""
     for i in range(len(inv)):
         out_str += str(inv[i]) + "\n"
-        if i > k * 30:
+        if i >= k * 30:
             k += 1
             temp.description = out_str
             pages.append(temp)
             out_str = ""
             temp = dpymenus.Page()
             temp.title = "{}'s Inventory ({} elements)".format(ctx.message.author.name, len(inv))
-    if k == 1:
+    if out_str != "":
         temp.description = out_str
         pages.append(temp)
-        temp = dpymenus.Page()
-        temp.title = "{}'s Inventory ({} elements)".format(ctx.message.author.name, len(inv))
-        temp.description = "You don't have more elements bud!"
-        pages.append(temp)
+    temp = dpymenus.Page()
+    temp.title = "{}'s Inventory ({} elements)".format(ctx.message.author.name, len(inv))
+    temp.description = "You don't have more elements bud!"
+    pages.append(temp)
     msg = dpymenus.PaginatedMenu(ctx)
     msg.add_pages(pages)
     await msg.open()
+
+
+# Change colour of element
+@client.command(aliases=["color"], help="Change the colour of an element. No vote required if you created element.\n" +
+                "Colour must be hex code. If your element is more than one word, put it in quotation marks. Do not use"
+                + "# sign before colour name.")
+async def colour(ctx, element, colour):
+    if element.upper() in element_index.keys():
+        e = element_dictionary[element_index[element.upper()]]
+        if re.match("^([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$", colour) is None:
+            await ctx.send("Invalid hex.")
+        else:
+            if e.creator == ctx.message.author.id:
+                e.colour = int(colour, 16)
+                await ctx.send("Changed colour! {}".format(ctx.message.author.mention))
+            else:
+                try:
+                    can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
+                except KeyError:
+                    can_add_poll = True
+
+                for poll in vote_dictionary:
+                    if vote_dictionary[poll][1] == "colour":
+                        if vote_dictionary[poll][2] == element:
+                            can_add_poll = False
+                if can_add_poll:
+                    embed = discord.Embed()
+                    embed.title = ":paintbrush: Colour Change: " + e.name
+                    embed.description = "Old Colour: {}\nNew Colour: {}\nSuggested by {}".format(e.colour, colour,
+                                                                                                 ctx.message.author.mention)
+                    embed.colour = colour
+                    embed.set_footer(text="Your vote can be changed, but will not be counted until you remove your other"
+                                          + " vote. Creators may downvote to delete.")
+                    message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
+
+                    vote_dictionary[message.id] = [0, "colour", e, colour, [], ctx.message.author.id]
+
+                    try:
+                        vote_count_dictionary[ctx.message.author.id] += 1
+                    except KeyError:
+                        vote_count_dictionary[ctx.message.author.id] = 1
+
+                    await message.add_reaction("🔼")
+                    await message.add_reaction("🔽")
+
+                    await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
+                else:
+                    await ctx.send("You cannot submit this poll!")
+
+    else:
+        await ctx.send("Invalid element.")
+
+
+@client.command(help="Add a category to an element.\n Put quotations around element and category names if longer than"
+                + " one word each. e.g. !category \"A A\" \"B B\"")
+async def category(ctx, element, category):
+
+    category = category.strip()
+    cat_length = len(category)
+    cat_original = category
+    category = category[0].upper()
+
+    for character in range(1, cat_length):
+        category += cat_original[character]
+
+    if element.upper() in element_index.keys():
+        e = element_dictionary[element_index[element.upper()]]
+        category_exists = False
+        c = None
+        c_index = -1
+        for i in category_dictionary.keys():
+            if category_dictionary[i].name.upper == category.upper():
+                category_exists = True
+                c = category_dictionary[i]
+                c_index = i
+                break
+        if not category_exists:
+            c = Category(len(category_dictionary), category, desc="")
+        try:
+            can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
+        except KeyError:
+            can_add_poll = True
+
+        for poll in vote_dictionary:
+            if vote_dictionary[poll][1] == "category":
+                if vote_dictionary[poll][2] == element:
+                    can_add_poll = False
+        if can_add_poll:
+            embed = discord.Embed()
+            embed.title = ":card_box: Category Change: " + e.name
+            embed.description = "Old Category: {}\nNew Category: {}\nSuggested by {}".format(e.category.name, c.name,
+                                                                                           ctx.message.author.mention)
+            embed.colour = e.colour
+            embed.set_footer(text="Your vote can be changed, but will not be counted until you remove your other"
+                                  + " vote. Creators may downvote to delete.")
+            message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
+
+            vote_dictionary[message.id] = [0, "category", e, c, [], ctx.message.author.id, c_index != -1]
+            try:
+                vote_count_dictionary[ctx.message.author.id] += 1
+            except KeyError:
+                vote_count_dictionary[ctx.message.author.id] = 1
+
+            await message.add_reaction("🔼")
+            await message.add_reaction("🔽")
+
+            await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
+        else:
+            await ctx.send("You cannot submit this poll!")
+    else:
+        await ctx.send("Invalid element!")
 
 # Live storage of elements and combinations. Will update and save to Firebase regularly.
 element_dictionary = {}
 element_index = {}
 combo_dictionary = {}
+
+# Stores the last combo made in !add.
 last_combo_dictionary = {}
-category_dictionary = {0: default}
+
+# Stores categories
+category_dictionary = {0: default, 1: starter}
+
+# Stores users
 user_dictionary = {}
+
+# Stores votes
+vote_dictionary = {}
+vote_count_dictionary = {}
+
 kaazikin = config.get("kaazikin.id").data
 
+# Stores statuses
+status_list = ["Looking for play7", "Submitting a spelling combination", "Adding 1000 numbers by hand", "Asking Kaaz " +
+               "to enable testing", "Doodling some gods", "Stepping on small alchemists",
+               "with chains that won'T continue", "B L O O P", "Praying to Egg gods", "with a water melon melon melon"]
+
 # Default elements for initial testing
+# TODO Replace these hardcoded elements with elements loaded from file / firebase
 element_dictionary[0] = Element([], 0, "Water", 0x4a8edf, datetime.datetime(2020, 10, 16, 0, 0, 0), 0, 1,
                                 "https://vignette.wikia.nocookie.net/avatar/images/5/50/Waterbending_emblem.png/"
                                 + "revision/latest?cb=20130729182922", 0,
@@ -384,7 +702,7 @@ default_inventory = [element_dictionary[0], element_dictionary[1], element_dicti
 
 # Index elements for access by number
 for x in range(len(element_dictionary)):
-    element_index[element_dictionary[x].name] = x
+    element_index[element_dictionary[x].name.upper()] = x
     print("Indexed element " + str(x) + " " + element_dictionary[x].name)
 
 rand = random.Random()
