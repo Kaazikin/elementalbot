@@ -131,13 +131,28 @@ class User:
     def add_inventory(self, elem):
         self.inventory.append(elem)
 
+    def has_element(self, elem):
+        return elem in self.inventory
+
     def __repr__(self):
         return "User: " + self.id
 
 
 class Vote:
-    pass
+    def __init__(self, message_id, poll_type, creator_id, element=None, category=None, colour=None, note=None,
+                 image=None, combinations=None, new_cat=None):
+        self.message_id = message_id
+        self.poll_type = poll_type
+        self.creator_id = creator_id
+        self.element = element
+        self.category = category
+        self.colour = colour
+        self.note = note
+        self.image = image
+        self.combinations = combinations
 
+        self.voters = []
+        self.value = 0
 
 intents = discord.Intents.default()
 intents.members = True
@@ -191,24 +206,25 @@ async def on_member_join(member):
 async def on_reaction_add(reaction, user):
     if reaction.message.channel.id == int(config.get("channel.voting").data) and user != client.user:
         if reaction.message.id in vote_dictionary.keys():
-            if reaction.emoji == "🔼" and user.id not in vote_dictionary[reaction.message.id][4]:
+            current_vote = vote_dictionary[reaction.message.id]
+            if reaction.emoji.name == "eodr_upvote" and user.id not in current_vote.voters:
 
-                vote_dictionary[reaction.message.id][0] += 1
-                vote_dictionary[reaction.message.id][4].append(user.id)
+                current_vote.value += 1
+                current_vote.voters.append(user.id)
 
                 # Handling for passing the vote threshold for specific vote types
-                if vote_dictionary[reaction.message.id][0] >= 2:
-                    if vote_dictionary[reaction.message.id][1] == "combination":  # If voting for a combination
+                if current_vote.value >= 2:
+                    if current_vote.poll_type == "combination":  # If voting for a combination
 
-                        out_combo = vote_dictionary[reaction.message.id][2]
+                        out_combo = current_vote.combinations
                         out_combo.id = len(combo_dictionary)
                         combo_dictionary[out_combo.id] = out_combo
                         element_dictionary[out_combo.output.id].add_combo(combo_dictionary[out_combo.id])
 
                         if element_dictionary[out_combo.output.id] not in \
-                                user_dictionary[vote_dictionary[reaction.message.id][3]].inventory:
-                            user_dictionary[vote_dictionary[reaction.message.id][3]].add_inventory(element_dictionary
-                                                                                                [out_combo.output.id])
+                                user_dictionary[current_vote.creator_id].inventory:
+                            user_dictionary[current_vote.creator_id].add_inventory(element_dictionary
+                                                                                            [out_combo.output.id])
 
                         element_unique = []
                         for element in out_combo.inputs:
@@ -221,19 +237,19 @@ async def on_reaction_add(reaction, user):
                         await client.get_channel\
                             (int(config.get("channel.announcement").data)).\
                             send(":new: Combination **{}** *(Suggested by {})*".format(out_combo.output.name,
-                                 client.get_user(vote_dictionary[reaction.message.id][3]).mention))
+                                 client.get_user(current_vote.creator_id).mention))
 
-                        vote_count_dictionary[vote_dictionary[reaction.message.id][3]] -= 1
+                        vote_count_dictionary[current_vote.creator_id] -= 1
                         vote_dictionary.pop(reaction.message.id)
                         await reaction.message.delete()
                         for votes in vote_dictionary.keys():
-                            if vote_dictionary[votes][2].inputs == out_combo.inputs:
-                                vote_count_dictionary[vote_dictionary[votes].pop()[3]] -= 1
+                            if vote_dictionary[votes].combinations.inputs == out_combo.inputs:
+                                vote_count_dictionary[vote_dictionary[votes].pop().creator_id] -= 1
                                 await reaction.message.channel.get_message(votes).delete()
 
-                    elif vote_dictionary[reaction.message.id][1] == "element":  # If voting for a new element
-                        out_elem = vote_dictionary[reaction.message.id][2]
-                        curr = vote_dictionary[reaction.message.id][5]
+                    elif current_vote.poll_type == "element":  # If voting for a new element
+                        out_elem = current_vote.element
+                        curr = current_vote.combinations
                         j = len(combo_dictionary)
                         i = len(element_dictionary)
                         out_elem.id = i
@@ -243,7 +259,7 @@ async def on_reaction_add(reaction, user):
 
                         element_dictionary[out_elem.id].add_combo(out_combo)
                         combo_dictionary[j] = out_combo
-                        user_dictionary[vote_dictionary[reaction.message.id][3]].add_inventory(out_elem)
+                        user_dictionary[current_vote.creator_id].add_inventory(out_elem)
 
                         element_unique = []
                         for element in out_combo.inputs:
@@ -255,73 +271,62 @@ async def on_reaction_add(reaction, user):
 
                         await client.get_channel(int(config.get("channel.announcement").data)).\
                             send(":new: Element **{}** *(Suggested by {})*".format(out_elem.name,
-                                client.get_user(vote_dictionary[reaction.message.id][3]).mention))
+                                client.get_user(current_vote.creator_id).mention))
 
-                        vote_count_dictionary[vote_dictionary[reaction.message.id][3]] -= 1
+                        vote_count_dictionary[current_vote.creator_id] -= 1
                         vote_dictionary.pop(reaction.message.id)
                         await reaction.message.delete()
                         for votes in vote_dictionary.keys():
-                            if vote_dictionary[votes][5].inputs == out_combo.inputs:
-                                vote_count_dictionary[vote_dictionary[votes].pop()[3]] -= 1
+                            if vote_dictionary[votes].combinations.compare_input(out_combo):
+                                vote_count_dictionary[vote_dictionary[votes].pop().creator_id] -= 1
                                 await reaction.message.channel.get_message(votes).delete()
+                            elif vote_dictionary[votes].element.name == out_elem.name:
+                                vote_dictionary[votes].element = out_elem
 
-                    elif vote_dictionary[reaction.message.id][1] == "colour": # If voting to change colour
-                        e = vote_dictionary[reaction.message.id][2]
-                        c = vote_dictionary[reaction.message.id][3]
+                    elif current_vote.poll_type == "colour":  # If voting to change colour
+                        e = current_vote.element
+                        c = current_vote.colour
                         e.colour = int(c, 16)
                         await client.get_channel(int(config.get("channel.announcement").data)). \
                             send(":paintbrush: Colour Change: **{}** *(Suggested by {})*".format(e.name,
-                                client.get_user(vote_dictionary[reaction.message.id][5]).mention))
+                                client.get_user(current_vote.creator_id).mention))
 
-                        vote_count_dictionary[vote_dictionary[reaction.message.id][5]] -= 1
+                        vote_count_dictionary[current_vote.creator_id] -= 1
                         vote_dictionary.pop(reaction.message.id)
                         await reaction.message.delete()
 
-                    elif vote_dictionary[reaction.message.id][1] == "category":
-                        e = vote_dictionary[reaction.message.id][2]
-                        c = vote_dictionary[reaction.message.id][3]
-                        if not vote_dictionary[reaction.message.id][6]:
+                    elif current_vote.poll_type == "category":
+                        e = current_vote.element
+                        c = current_vote.category
+                        if current_vote.new_cat:
                             c.id = len(category_dictionary)
                             category_dictionary[c.id] = c
                         e.category = c
                         await client.get_channel(int(config.get("channel.announcement").data)). \
                             send(":card_box: Category Change: **{}** *(Suggested by {})*".format(e.name,
-                                 client.get_user(vote_dictionary[reaction.message.id][5]).mention))
+                                 client.get_user(current_vote.creator_id).mention))
 
-                        vote_count_dictionary[vote_dictionary[reaction.message.id][5]] -= 1
+                        vote_count_dictionary[current_vote.creator_id] -= 1
                         vote_dictionary.pop(reaction.message.id)
                         await reaction.message.delete()
 
-            elif reaction.emoji == "🔽" and user.id not in vote_dictionary[reaction.message.id][4]:
-                vote_dictionary[reaction.message.id][0] -= 1
-                vote_dictionary[reaction.message.id][4].append(user.id)
-                if user.id == vote_dictionary[reaction.message.id][3] or vote_dictionary[reaction.message.id][0] <= -2 or user.id == vote_dictionary[reaction.message.id][5]:
-                    try:
-                        vote_count_dictionary[vote_dictionary.pop(reaction.message.id)[3]] -= 1
-                    except:
-                        pass
-
-                    try:
-                        vote_count_dictionary[vote_dictionary.pop(reaction.message.id)[5]] -= 1
-                    except:
-                        pass
-
-                    vote_count_dictionary[vote_dictionary.pop(reaction.message.id)[3]] -= 1
+            elif reaction.emoji.name == "eodr_downvote" and user.id not in current_vote.voters:
+                current_vote.value -= 1
+                current_vote.voters.append(user.id)
+                if user.id == current_vote.creator_id or current_vote.value <= -2:
+                    vote_count_dictionary[vote_dictionary.pop(reaction.message.id).creator_id] -= 1
                     await reaction.message.delete()
-
-            elif reaction.emoji == "🔽" and user.id == vote_dictionary[reaction.message.id][3]:
-                vote_dictionary.pop(reaction.message.id)
-                await reaction.message.delete()
 
 
 @client.event
 async def on_reaction_remove(reaction, user):
     if reaction.message.channel.id == int(config.get("channel.voting").data) and user != client.user:
         if reaction.message.id in vote_dictionary.keys():
-            if reaction.emoji == "🔼" and user.id in vote_dictionary[reaction.message.id][4]:
-                vote_dictionary[reaction.message.id][0] -= 1
+            current_poll = vote_dictionary[reaction.message.id]
+            if reaction.emoji == UPVOTE and user.id in vote_dictionary[reaction.message.id][4]:
+                current_poll.value -= 1
                 vote_dictionary[reaction.message.id][4].remove(user.id)
-            elif reaction.emoji == "🔽" and user.id in vote_dictionary[reaction.message.id][4]:
+            elif reaction.emoji == DOWNVOTE and user.id in vote_dictionary[reaction.message.id][4]:
                 vote_dictionary[reaction.message.id][0] += 1
                 vote_dictionary[reaction.message.id][4].remove(user.id)
 
@@ -456,8 +461,9 @@ async def suggest(ctx, *, element):
                 can_add_poll = True
 
             for poll in vote_dictionary:
-                if vote_dictionary[poll][1] == "combination":
-                    if vote_dictionary[poll][2] == out_combo and vote_dictionary[poll][3] == ctx.message.author.id:
+                if vote_dictionary[poll].poll_type == "combination":
+                    if vote_dictionary[poll].combinations.compare_input(out_combo) and \
+                            vote_dictionary[poll].element == out_elem:
                         can_add_poll = False
 
             if can_add_poll:
@@ -469,15 +475,16 @@ async def suggest(ctx, *, element):
                                       + " vote. Creators may downvote to delete.")
                 message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
 
-                vote_dictionary[message.id] = [0, "combination", out_combo, ctx.message.author.id, []]
+                vote_dictionary[message.id] = Vote(message.id, "combination", element=out_elem, combinations=out_combo,
+                                                   creator_id=ctx.message.author.id)
 
                 try:
                     vote_count_dictionary[ctx.message.author.id] += 1
                 except KeyError:
                     vote_count_dictionary[ctx.message.author.id] = 1
 
-                await message.add_reaction("🔼")
-                await message.add_reaction("🔽")
+                await message.add_reaction(UPVOTE)
+                await message.add_reaction(DOWNVOTE)
 
                 await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
             else:
@@ -515,8 +522,9 @@ async def suggest(ctx, *, element):
                 can_add_poll = True
 
             for poll in vote_dictionary:
-                if vote_dictionary[poll][1] == "element":
-                    if vote_dictionary[poll][5] == curr and vote_dictionary[poll][3] == ctx.message.author.id:
+                if vote_dictionary[poll].poll_type == "element":
+                    if vote_dictionary[poll].combinations.compare_input(curr) or \
+                            vote_dictionary[poll].element.name == out_elem.name:
                         can_add_poll = False
 
             if can_add_poll:
@@ -528,15 +536,16 @@ async def suggest(ctx, *, element):
                                       + " vote. Creators may downvote to delete.")
                 message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
 
-                vote_dictionary[message.id] = [0, "element", out_elem, ctx.message.author.id, [], curr]
+                vote_dictionary[message.id] = Vote(message.id, "element", element=out_elem, combinations=curr,
+                                                   creator_id=ctx.message.author.id)
 
                 try:
                     vote_count_dictionary[ctx.message.author.id] += 1
                 except KeyError:
                     vote_count_dictionary[ctx.message.author.id] = 1
 
-                await message.add_reaction("🔼")
-                await message.add_reaction("🔽")
+                await message.add_reaction(UPVOTE)
+                await message.add_reaction(DOWNVOTE)
 
                 await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
             else:
@@ -590,39 +599,45 @@ async def colour(ctx, element, colour):
             if e.creator == ctx.message.author.id:
                 e.colour = int(colour, 16)
                 await ctx.send("Changed colour! {}".format(ctx.message.author.mention))
-            else:
+            elif user_dictionary[ctx.message.author.id].has_elem(e):
                 try:
                     can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
                 except KeyError:
                     can_add_poll = True
 
                 for poll in vote_dictionary:
-                    if vote_dictionary[poll][1] == "colour":
-                        if vote_dictionary[poll][2] == element and vote_dictionary[poll][5] == ctx.message.author.id:
+                    if vote_dictionary[poll].poll_type == "colour":
+                        if vote_dictionary[poll].element == element and vote_dictionary[poll].creator_id == \
+                                ctx.message.author.id:
                             can_add_poll = False
                 if can_add_poll:
                     embed = discord.Embed()
                     embed.title = ":paintbrush: Colour Change: " + e.name
                     embed.description = "Old Colour: {}\nNew Colour: {}\nSuggested by {}".format(e.colour, colour,
-                                                                                                 ctx.message.author.mention)
+                                                                                                 ctx.message.author.
+                                                                                                 mention)
                     embed.colour = colour
-                    embed.set_footer(text="Your vote can be changed, but will not be counted until you remove your other"
+                    embed.set_footer(text="Your vote can be changed but will not be counted until you remove your other"
                                           + " vote. Creators may downvote to delete.")
-                    message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
+                    message = await client.get_channel(int(config.get("channel.voting").data)).send(content="",
+                                                                                                    embed=embed)
 
-                    vote_dictionary[message.id] = [0, "colour", e, colour, [], ctx.message.author.id]
+                    vote_dictionary[message.id] = Vote(message.id, "colour", element=e, colour=colour, creator_id=
+                                                       ctx.message.author.id)
 
                     try:
                         vote_count_dictionary[ctx.message.author.id] += 1
                     except KeyError:
                         vote_count_dictionary[ctx.message.author.id] = 1
 
-                    await message.add_reaction("🔼")
-                    await message.add_reaction("🔽")
+                    await message.add_reaction(UPVOTE)
+                    await message.add_reaction(DOWNVOTE)
 
                     await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
                 else:
                     await ctx.send("You cannot submit this poll!")
+            else:
+                await ctx.send("You don't have that element.")
 
     else:
         await ctx.send("Invalid element.")
@@ -654,9 +669,10 @@ async def category(ctx, element, category):
         if not category_exists:
             c = Category(len(category_dictionary), category, desc="")
         try:
-            can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
+            can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10) and \
+                           user_dictionary[ctx.message.author.id].has_element(e)
         except KeyError:
-            can_add_poll = True
+            can_add_poll = True and user_dictionary[ctx.message.author.id].has_element(e)
 
         for poll in vote_dictionary:
             if vote_dictionary[poll][1] == "category":
@@ -672,14 +688,15 @@ async def category(ctx, element, category):
                                   + " vote. Creators may downvote to delete.")
             message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
 
-            vote_dictionary[message.id] = [0, "category", e, c, [], ctx.message.author.id, c_index != -1]
+            vote_dictionary[message.id] = Vote(message.id, "category", creator_id=ctx.message.author.id, element=e,
+                                               category=c, new_cat= not category_exists)
             try:
                 vote_count_dictionary[ctx.message.author.id] += 1
             except KeyError:
                 vote_count_dictionary[ctx.message.author.id] = 1
 
-            await message.add_reaction("🔼")
-            await message.add_reaction("🔽")
+            await message.add_reaction(UPVOTE)
+            await message.add_reaction(DOWNVOTE)
 
             await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
         else:
@@ -706,6 +723,9 @@ vote_dictionary = {}
 vote_count_dictionary = {}
 
 kaazikin = config.get("kaazikin.id").data
+
+UPVOTE = "<:eodr_upvote:769286560188989481"
+DOWNVOTE = "<:eodr_downvote:769286560134332497"
 
 # Stores statuses
 status_list = ["Looking for play7", "Submitting a spelling combination", "Adding 1000 numbers by hand", "Asking Kaaz " +
