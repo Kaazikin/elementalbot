@@ -1,13 +1,14 @@
 # TODO Add Firebase backup
 # TODO Sorting inventory
-# TODO Sign
 # TODO Add image
 # TODO Unlocked by numbers
 # TODO Hints
 # TODO Reset inventory
 # TODO Plurals
-# TODO Pattern matching in on_message
-# TODO Rewrite voting
+# TODO Category info changes
+# TODO Backup loading
+
+import os
 import discord
 import re
 import math
@@ -36,6 +37,9 @@ class Category:
         self.colour = colour
         self.imageurl = imageurl
 
+    def all_data(self):
+        return "{},{},{},{},{}\n".format(self.id, self.name, self.desc, self.colour, self.imageurl)
+
 
 class Combination:
     def __init__(self, id, output, inputs):
@@ -50,7 +54,7 @@ class Combination:
         return max([i.generation for i in self.inputs])
 
     def __repr__(self):
-        return "Combination({}, {}, {}, {})".format(self.id, self.output, self.inputs, self.get_generation())
+        return "Combination({},{},{})".format(self.id, self.output, self.inputs)
 
     def __gt__(self, other):
         return self.id > other.id
@@ -66,6 +70,9 @@ class Combination:
 
     def __ge__(self, other):
         return self.id >= other.id
+
+    def all_data(self):
+        return str(self)
 
 
 default = Category(0, "No Category", "These are elements with no category.")
@@ -119,6 +126,12 @@ class Element:
     def __ge__(self, other):
         return self.id >= other.id
 
+    def all_data(self):
+        return "{},{},{},{},{},{},{},{},{},{},{},{}\n".format(self.combinations, self.id, self.name, self.creationdate,
+                                                              self.colour, self.description, self.imageurl,
+                                                              self.usecount, self.unlockedcount, self.creator,
+                                                              self.generation, self.category)
+
 
 class User:
     def __init__(self, id, inventory):
@@ -137,6 +150,9 @@ class User:
     def __repr__(self):
         return "User: " + self.id
 
+    def all_data(self):
+        return "{},{}\n".format(self.id, self.inventory)
+
 
 class Vote:
     def __init__(self, message_id, poll_type, creator_id, element=None, category=None, colour=None, note=None,
@@ -150,9 +166,11 @@ class Vote:
         self.note = note
         self.image = image
         self.combinations = combinations
+        self.new_cat = new_cat
 
         self.voters = []
         self.value = 0
+
 
 intents = discord.Intents.default()
 intents.members = True
@@ -176,10 +194,11 @@ async def on_ready():
     guilds = client.guilds
     for g in guilds:
         for user in g.members:
-            # TODO Load inventories from file
+            # TODO Load inventorwaties from file
             user_dictionary[user.id] = User(user.id, default_inventory[:])
     await client.change_presence(activity=discord.Game(random.choice(status_list)))
     random_status.start()
+    backup.start()
 
 
 @client.event
@@ -310,6 +329,30 @@ async def on_reaction_add(reaction, user):
                         vote_dictionary.pop(reaction.message.id)
                         await reaction.message.delete()
 
+                    elif current_vote.poll_type == "note":
+                        e = current_vote.element
+                        n = current_vote.note
+                        e.note = n
+                        await client.get_channel(int(config.get("channel.announcement").data)). \
+                            send(":pencil: Signed: **{}** *(Suggested by {})*".format(e.name, client.get_user(
+                            current_vote.creator_id).mention))
+
+                        vote_count_dictionary[current_vote.creator_id] -= 1
+                        vote_dictionary.pop(reaction.message.id)
+                        await reaction.message.delete()
+
+                    elif current_vote.poll_type == "image":
+                        e = current_vote.element
+                        i = current_vote.image
+                        e.imageurl = i
+                        await client.get_channel(int(config.get("channel.announcement").data)). \
+                            send(":camera_with_flash: New Image: **{}** *(Suggested by {})*".format(e.name,
+                            client.get_user(current_vote.creator_id).mention))
+
+                        vote_count_dictionary[current_vote.creator_id] -= 1
+                        vote_dictionary.pop(reaction.message.id)
+                        await reaction.message.delete()
+
             elif reaction.emoji.name == "eodr_downvote" and user.id not in current_vote.voters:
                 current_vote.value -= 1
                 current_vote.voters.append(user.id)
@@ -335,6 +378,21 @@ async def on_reaction_remove(reaction, user):
 @tasks.loop(minutes=20.0)
 async def random_status():
     await client.change_presence(activity=discord.Game(random.choice(status_list)))
+
+
+# Backs stuff up to text file
+# TODO Change to Firebase
+@tasks.loop(hours=1.0)
+async def backup():
+    files = ["elements.txt", "combinations.txt", "categories.txt", "users.txt"]
+    dictionaries = [element_dictionary, combo_dictionary, category_dictionary, user_dictionary]
+    for i in range(4):
+        if os.path.exists(files[i]):
+            os.remove(files[i])
+        f = open(files[i], "a")
+        for n in dictionaries[i].keys():
+            f.write(dictionaries[i][n].all_data())
+        f.close()
 
 
 # sends all info of an element as an embed.
@@ -689,7 +747,7 @@ async def category(ctx, element, category):
             message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
 
             vote_dictionary[message.id] = Vote(message.id, "category", creator_id=ctx.message.author.id, element=e,
-                                               category=c, new_cat= not category_exists)
+                                               category=c, new_cat=(not category_exists))
             try:
                 vote_count_dictionary[ctx.message.author.id] += 1
             except KeyError:
@@ -704,6 +762,139 @@ async def category(ctx, element, category):
     else:
         await ctx.send("Invalid element!")
 
+
+@client.command(help="Forces backup. Admin only.")
+@commands.has_permissions(administrator=True)
+async def force_backup(ctx):
+    files = ["elements.txt", "combinations.txt", "categories.txt", "users.txt"]
+    dictionaries = [element_dictionary, combo_dictionary, category_dictionary, user_dictionary]
+    for i in range(4):
+        if os.path.exists(files[i]):
+            os.remove(files[i])
+        f = open(files[i], "a")
+        for n in dictionaries[i].keys():
+            f.write(dictionaries[i][n].all_data())
+        f.close()
+    await ctx.send("Backed up.")
+
+
+@client.command(help="Adds a note to an element.\nPut quotations around the note and the elem.", aliases=["sign", "n"])
+async def note(ctx, element, n):
+    if element.upper() in element_index.keys():
+        e = element_dictionary[element_index[element.upper()]]
+        if len(n) > 1024:
+            await ctx.send("Notes must be 1024 chars or shorter.")
+        else:
+            if e.creator == ctx.message.author.id:
+                e.description = n
+                await ctx.send("Signed! {}".format(ctx.message.author.mention))
+            elif user_dictionary[ctx.message.author.id].has_elem(e):
+                try:
+                    can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
+                except KeyError:
+                    can_add_poll = True
+
+                for poll in vote_dictionary:
+                    if vote_dictionary[poll].poll_type == "note":
+                        if vote_dictionary[poll].element == element and vote_dictionary[poll].creator_id == \
+                                ctx.message.author.id:
+                            can_add_poll = False
+                if can_add_poll:
+                    embed = discord.Embed()
+                    embed.title = ":pencil: Note: " + e.name
+                    embed.description = "Old Note: {}\nNew Note: {}\nSuggested by {}".format(e.description, n,
+                                                                                                 ctx.message.author.
+                                                                                                 mention)
+                    embed.description = n
+                    embed.set_footer(text="Your vote can be changed but will not be counted until you remove your other"
+                                          + " vote. Creators may downvote to delete.")
+                    message = await client.get_channel(int(config.get("channel.voting").data)).send(content="",
+                                                                                                    embed=embed)
+
+                    vote_dictionary[message.id] = Vote(message.id, "note", element=e, note=n, creator_id=
+                                                       ctx.message.author.id)
+
+                    try:
+                        vote_count_dictionary[ctx.message.author.id] += 1
+                    except KeyError:
+                        vote_count_dictionary[ctx.message.author.id] = 1
+
+                    await message.add_reaction(UPVOTE)
+                    await message.add_reaction(DOWNVOTE)
+
+                    await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
+                else:
+                    await ctx.send("You cannot submit this poll!")
+            else:
+                await ctx.send("You don't have that element.")
+
+    else:
+        await ctx.send("Invalid element.")
+
+
+# TODO Attach image
+# TODO Figure out a better way to validate urL
+@client.command(help="Adds an image.\nPut the image url in quotes.", aliases=["img", "pic"])
+async def image(ctx, element, url):
+    if element.upper() in element_index.keys():
+        e = element_dictionary[element_index[element.upper()]]
+        if (url[:9] == "https://" or url[:8] == "http://") and (".png" in url or ".jpg" in url or ".jpeg" in url or
+                                                                ".gif" in url):
+            await ctx.send("Invalid url.")
+        else:
+            if e.creator == ctx.message.author.id:
+                e.imageurl = url
+                await ctx.send("Changed image! {}".format(ctx.message.author.mention))
+            elif user_dictionary[ctx.message.author.id].has_elem(e):
+                try:
+                    can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
+                except KeyError:
+                    can_add_poll = True
+
+                for poll in vote_dictionary:
+                    if vote_dictionary[poll].poll_type == "image":
+                        if vote_dictionary[poll].element == element and vote_dictionary[poll].creator_id == \
+                                ctx.message.author.id:
+                            can_add_poll = False
+                if can_add_poll:
+                    embed = discord.Embed()
+                    embed.title = ":camera_with_flash: Image Change: " + e.name
+                    embed.description = "[Old Image]({})\n[New Image]({})\nSuggested by {}".format(e.imageurl, url,
+                                                                                                 ctx.message.author.
+                                                                                                 mention)
+                    embed.set_image(url=url)
+                    embed.set_footer(text="Your vote can be changed but will not be counted until you remove your other"
+                                          + " vote. Creators may downvote to delete.")
+                    message = await client.get_channel(int(config.get("channel.voting").data)).send(content="",
+                                                                                                    embed=embed)
+
+                    vote_dictionary[message.id] = Vote(message.id, "image", element=e, image=url, creator_id=
+                                                       ctx.message.author.id)
+
+                    try:
+                        vote_count_dictionary[ctx.message.author.id] += 1
+                    except KeyError:
+                        vote_count_dictionary[ctx.message.author.id] = 1
+
+                    await message.add_reaction(UPVOTE)
+                    await message.add_reaction(DOWNVOTE)
+
+                    await ctx.send("Poll sent! {}".format(ctx.message.author.mention))
+                else:
+                    await ctx.send("You cannot submit this poll!")
+            else:
+                await ctx.send("You don't have that element.")
+
+    else:
+        await ctx.send("Invalid element.")
+
+
+@client.command(help="Gives server information.")
+async def stats(ctx):
+    await ctx.send("{}\nElement Count: {}\nCombination Count: {}\nServer Members: {}".format(ctx.message.author.mention,
+                                                                                             len(element_dictionary),
+                                                                                             len(combo_dictionary),
+                                                                                             len(ctx.guild.members)))
 # Live storage of elements and combinations. Will update and save to Firebase regularly.
 element_dictionary = {}
 element_index = {}
