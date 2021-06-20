@@ -1,14 +1,12 @@
 # TODO Add Firebase backup
 # TODO Sorting inventory
-# TODO Add image
 # TODO Unlocked by numbers
 # TODO Hints
 # TODO Reset inventory
+# TODO Fix colour
 # TODO Plurals
-# TODO Category info changes
-# TODO Category Revamp
 # TODO Backup loading
-# TODO staging ground for votes (len(catdict) + len(votingcats))
+# TODO Limit length of categories shown in element desc.
 
 import os
 import discord
@@ -693,6 +691,7 @@ async def colour(ctx, element, colour):
                 e.colour = int(colour, 16)
                 await ctx.send("Changed colour! {}".format(ctx.message.author.mention))
             elif user_dictionary[ctx.message.author.id].has_element(e):
+                colour = int(colour, 16)
                 try:
                     can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
                 except KeyError:
@@ -737,7 +736,7 @@ async def colour(ctx, element, colour):
 
 
 @client.command(aliases=["addcat", "ac"], help="Add elements to a category.\n Put quotations around element and category names "
-                + "e.g. !category \"Core\" \"water\"")
+                + "e.g. !addcat \"Core\" \"water\"")
 async def addcategory(ctx, category, *elements):
 
     category = category.strip()
@@ -834,7 +833,11 @@ async def categoryinfo(ctx, category):
         temp.title = c.name
         out_str = "**{}**\n".format(c.desc)
         for i in range(len(c.items)):
-            out_str += str(c.items[i]) + "\n"
+            out_str += str(c.items[i])
+            if user_dictionary[ctx.message.author.id].has_element(c.items[i]):
+                out_str += " :white_check_mark:\n"
+            else:
+                out_str += " :negative_squared_cross_mark:\n"
             if i >= k * 30:
                 k += 1
                 temp.description = out_str
