@@ -8,6 +8,7 @@
 # TODO Category info changes
 # TODO Category Revamp
 # TODO Backup loading
+# TODO staging ground for votes (len(catdict) + len(votingcats))
 
 import os
 import discord
@@ -48,7 +49,14 @@ class Category:
         return sorted(self.items)
 
     def add_item(self, e):
-        self.items.append(e)
+        if isinstance(e, list):
+            for elem in e:
+                self.items.append(elem)
+        else:
+            self.items.append(e)
+
+    def __repr__(self):
+        return self.name + " (" + str(self.id) + ")"
 
 
 class Combination:
@@ -91,7 +99,7 @@ starter = Category(1, "Core", "These are starter elements.")
 
 class Element:
     def __init__(self, combinations, id, name, colour=0x000000, creationdate=datetime.datetime.now(), usecount=0,
-                 unlockedcount=1, imageurl="", generation=-1, description="No note.", creator=None, category=default):
+                 unlockedcount=1, imageurl="", generation=-1, description="No note.", creator=None, categories=[default]):
         self.combinations = combinations
         self.id = id
         self.name = name
@@ -103,7 +111,7 @@ class Element:
         self.unlockedcount = unlockedcount
         self.creator = creator
         self.generation = generation
-        self.category = category
+        self.categories = categories
 
     def add_combo(self, combo):
         self.combinations.append(combo)
@@ -140,7 +148,7 @@ class Element:
         return "{},{},{},{},{},{},{},{},{},{},{},{}\n".format(self.combinations, self.id, self.name, self.creationdate,
                                                               self.colour, self.description, self.imageurl,
                                                               self.usecount, self.unlockedcount, self.creator,
-                                                              self.generation, self.category)
+                                                              self.generation, self.categories)
 
 
 class User:
@@ -240,7 +248,7 @@ async def on_reaction_add(reaction, user):
 
                 current_vote.value += 1
                 current_vote.voters.append(user.id)
-
+                print(current_vote.value)
                 # Handling for passing the vote threshold for specific vote types
                 if current_vote.value >= 2:
                     if current_vote.poll_type == "combination":  # If voting for a combination
@@ -291,6 +299,8 @@ async def on_reaction_add(reaction, user):
                         combo_dictionary[j] = out_combo
                         user_dictionary[current_vote.creator_id].add_inventory(out_elem)
 
+                        default.add_item(out_elem)
+
                         element_unique = []
                         for element in out_combo.inputs:
                             if element not in element_unique:
@@ -327,14 +337,19 @@ async def on_reaction_add(reaction, user):
                         await reaction.message.delete()
 
                     elif current_vote.poll_type == "category":
-                        e = current_vote.element
+                        elems = current_vote.element
                         c = current_vote.category
                         if current_vote.new_cat:
                             c.id = len(category_dictionary)
                             category_dictionary[c.id] = c
-                        e.category = c
+                        for e in elems:
+                            if len(e.categories) == 1 and e.categories[0].id == 0:
+                                e.categories[0] = c
+                            else:
+                                e.categories.append(c)
+                        c.add_item(elems)
                         await client.get_channel(int(config.get("channel.announcement").data)). \
-                            send(":card_box: Category Change: **{}** *(Suggested by {})*".format(e.name,
+                            send(":card_box: Category Update: **{}** *(Suggested by {})*".format(c.name,
                                  client.get_user(current_vote.creator_id).mention))
 
                         vote_count_dictionary[current_vote.creator_id] -= 1
@@ -434,7 +449,7 @@ async def info(ctx, *element):
         output.add_field(name="Used in:", value=str(current.usecount), inline=True)
         output.add_field(name="Made with:", value=str(current.get_combination_count()), inline=True)
         output.add_field(name="Unlocked by:", value=str(current.unlockedcount), inline=True)
-        output.add_field(name="Category:", value=current.category.name, inline=True)
+        output.add_field(name="Category:", value=str(current.categories), inline=True)
         output.add_field(name="Generation:", value=str(current.get_generation()), inline=True)
         output.add_field(name="Unlocked:", value=str(current in user_dictionary[ctx.message.author.id].inventory),
                          inline=True)
@@ -721,9 +736,9 @@ async def colour(ctx, element, colour):
         await ctx.send("Invalid element.")
 
 
-@client.command(help="Add a category to an element.\n Put quotations around element and category names if longer than"
-                + " one word each. e.g. !category \"A A\" \"B B\"")
-async def category(ctx, element, category):
+@client.command(aliases=["addcat", "ac"], help="Add elements to a category.\n Put quotations around element and category names "
+                + "e.g. !category \"Core\" \"water\"")
+async def addcategory(ctx, category, *elements):
 
     category = category.strip()
     cat_length = len(category)
@@ -733,41 +748,61 @@ async def category(ctx, element, category):
     for character in range(1, cat_length):
         category += cat_original[character]
 
-    if element.upper() in element_index.keys():
-        e = element_dictionary[element_index[element.upper()]]
-        category_exists = False
-        c = None
-        c_index = -1
-        for i in category_dictionary.keys():
-            if category_dictionary[i].name.upper == category.upper():
-                category_exists = True
-                c = category_dictionary[i]
-                c_index = i
+
+
+    # check if category exists, make new one if not
+    category_exists = False
+    c = None
+
+    c_index = -1
+    for i in category_dictionary.keys():
+        if category_dictionary[i].name.upper() == category.upper():
+            category_exists = True
+            c = category_dictionary[i]
+            c_index = i
+            break
+        # validate elements
+    elements_valid = 0 < len(elements) < 11
+    finalelems = []
+    for e in elements:
+        if e.upper() not in element_index.keys():
+            elements_valid = False
+            break
+        finalelems.append(element_dictionary[element_index[e.upper()]])
+        if not user_dictionary[ctx.message.author.id].has_element(finalelems[-1]):
+            elements_valid = False
+            break
+        if category_exists:
+            if c in finalelems[-1].categories:
+                elements_valid = False
                 break
+    if elements_valid:
+
         if not category_exists:
             c = Category(len(category_dictionary), category, desc="")
         try:
-            can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10) and \
-                           user_dictionary[ctx.message.author.id].has_element(e)
+            can_add_poll = (vote_count_dictionary[ctx.message.author.id] <= 10)
         except KeyError:
-            can_add_poll = True and user_dictionary[ctx.message.author.id].has_element(e)
+            can_add_poll = True
 
         for poll in vote_dictionary.keys():
             if vote_dictionary[poll].poll_type == "category":
-                if vote_dictionary[poll].element == e and vote_dictionary[poll].creator_id == ctx.message.author.id:
+                if vote_dictionary[poll].element == sorted(finalelems) and vote_dictionary[poll].creator_id == \
+                        ctx.message.author.id:
                     can_add_poll = False
         if can_add_poll:
             embed = discord.Embed()
-            embed.title = ":card_box: Category Change: " + e.name
-            embed.description = "Old Category: {}\nNew Category: {}\nSuggested by {}".format(e.category.name, c.name,
-                                                                                           ctx.message.author.mention)
-            embed.colour = e.colour
+            embed.title = ":card_box: Category Update"
+
+            embed.description = "Category: {}\nSuggested by {}\n Elements: {}".format(c.name, ctx.message.author.mention
+                                                                                      , finalelems)
+            embed.colour = finalelems[0].colour
             embed.set_footer(text="Your vote can be changed, but will not be counted until you remove your other"
                                   + " vote. Creators may downvote to delete.")
             message = await client.get_channel(int(config.get("channel.voting").data)).send(content="", embed=embed)
 
-            vote_dictionary[message.id] = Vote(message.id, "category", creator_id=ctx.message.author.id, element=e,
-                                               category=c, new_cat=(not category_exists))
+            vote_dictionary[message.id] = Vote(message.id, "category", creator_id=ctx.message.author.id,
+                                               element=finalelems, category=c, new_cat=(not category_exists))
             try:
                 vote_count_dictionary[ctx.message.author.id] += 1
             except KeyError:
@@ -780,7 +815,44 @@ async def category(ctx, element, category):
         else:
             await ctx.send("You cannot submit this poll!")
     else:
-        await ctx.send("Invalid element!")
+        await ctx.send("Invalid element input.")
+
+
+@client.command(aliases=["catinfo", "infocat", "ci"])
+async def categoryinfo(ctx, category):
+    category_exists = False
+    c = None
+    for i in category_dictionary.keys():
+        if category_dictionary[i].name.upper() == category.upper():
+            category_exists = True
+            c = category_dictionary[i]
+            break
+    if category_exists:
+        pages = []
+        k = 1
+        temp = dpymenus.Page()
+        temp.title = c.name
+        out_str = "**{}**\n".format(c.desc)
+        for i in range(len(c.items)):
+            out_str += str(c.items[i]) + "\n"
+            if i >= k * 30:
+                k += 1
+                temp.description = out_str
+                pages.append(temp)
+                out_str = ""
+                temp = dpymenus.Page()
+                temp.title = "{}: {} elements".format(c.name, len(c.items))
+        if out_str != "":
+            temp.description = out_str
+            pages.append(temp)
+        temp = dpymenus.Page()
+        temp.title = temp.title = "{}: {} elements".format(c.name, len(c.items))
+        temp.description = "No more elements."
+        pages.append(temp)
+        msg = dpymenus.PaginatedMenu(ctx)
+        msg.add_pages(pages)
+        await msg.open()
+
 
 
 @client.command(help="Forces backup. Admin only.")
@@ -950,23 +1022,24 @@ element_dictionary[0] = Element([], 0, "Water", 0x4a8edf, datetime.datetime(2020
                                 + "revision/latest?cb=20130729182922", 0,
                                 "A colorless, transparent, odorless liquid that forms the seas, lakes, rivers, "
                                 + "and rain and is the basis of the fluids of living organisms.", int(kaazikin),
-                                starter)
+                                [starter])
 element_dictionary[1] = Element([], 1, "Earth", 0x764722, datetime.datetime(2020, 10, 16, 0, 0, 0), 0, 1,
                                 "https://vignette.wikia.nocookie.net/avatar/images/e/e4/Earthbending_emblem.png/"
                                 + "revision/latest?cb=20130729200732", 0,
-                                "The substance of the land surface; soil.", int(kaazikin), starter)
+                                "The substance of the land surface; soil.", int(kaazikin), [starter])
 element_dictionary[2] = Element([], 2, "Fire", 0xfe5913, datetime.datetime(2020, 10, 16, 0, 0, 0), 0, 1,
                                 "https://vignette.wikia.nocookie.net/avatar/images/4/4b/"
                                 + "Firebending_emblem.png/revision/latest?cb=20130729203233", 0,
                                 "Combustion or burning, in which substances combine chemically with oxygen from the air"
-                                + " and typically give out bright light, heat, and smoke.", int(kaazikin), starter)
+                                + " and typically give out bright light, heat, and smoke.", int(kaazikin), [starter])
 element_dictionary[3] = Element([], 3, "Air", 0xfffce0, datetime.datetime(2020, 10, 16, 0, 0, 0), 0, 1,
                                 "https://vignette.wikia.nocookie.net/avatar/images/8/82/Airbending_emblem.png/revision/"
                                 + "latest?cb=20130729210446", 0,
                                 "The invisible gaseous substance surrounding the earth, "
-                                + "a mixture mainly of oxygen and nitrogen.", int(kaazikin), starter)
+                                + "a mixture mainly of oxygen and nitrogen.", int(kaazikin), [starter])
 
 default_inventory = [element_dictionary[0], element_dictionary[1], element_dictionary[2], element_dictionary[3]]
+starter.add_item(default_inventory)
 
 # Index elements for access by number
 for x in range(len(element_dictionary)):
